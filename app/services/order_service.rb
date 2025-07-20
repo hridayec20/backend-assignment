@@ -36,11 +36,19 @@ class OrderService
   end
 
   def cancel_order
-    @order.order_items.each do |item|
-      product = item.product
-      product.update!(quantity: product.quantity + item.quantity)
+    return if @order.status == 'cancelled'
+    
+    ActiveRecord::Base.transaction do
+      @order.with_lock do
+        @order.order_items.each do |item|
+          product = item.product
+          product.with_lock do
+            product.update!(quantity: product.quantity + item.quantity)
+          end
+        end
+        @order.update!(status: 'cancelled')
+      end
     end
-    @order.update!(status: 'cancelled')
   end
 
   def complete_order
