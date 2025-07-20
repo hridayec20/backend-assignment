@@ -29,6 +29,7 @@ class OrderService
 
   def process_order
     return false if @order.status == 'processing' || @order.status == 'completed'
+    return false if @order.status != 'validated'
 
     ActiveRecord::Base.transaction do
       @order.with_lock do
@@ -72,11 +73,20 @@ class OrderService
   end
 
   def validate_order
-    @order.order_items.each do |item|
-      product = item.product
-      return false unless product.can_be_ordered?(item.quantity)
+    ActiveRecord::Base.transaction do
+      @order.order_items.each do |item|
+        product = item.product
+        product.with_lock do
+          unless product.active? && item.quantity > 0 && product.quantity >= item.quantity
+            return false
+          end
+        end
+      end
+      @order.update!(status: 'validated')
+      true
     end
-    true
+  rescue ActiveRecord::RecordInvalid
+    false
   end
 
   private
