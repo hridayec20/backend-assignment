@@ -16,8 +16,13 @@ class Product < ApplicationRecord
   end
 
   def self.bulk_update(products_data)
-    products_data.each do |data|
-      find(data[:id]).update(data.except(:id))
+    ActiveRecord::Base.transaction do
+      products_data.each do |data|
+        product = find(data[:id])
+        product.with_lock do
+          product.update!(data.except(:id))
+        end
+      end
     end
   end
 
