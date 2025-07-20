@@ -28,11 +28,23 @@ class OrderService
   end
 
   def process_order
-    @order.order_items.each do |item|
-      product = item.product
-      product.update!(quantity: product.quantity - item.quantity)
+    return false if @order.status == 'processing' || @order.status == 'completed'
+
+    ActiveRecord::Base.transaction do
+      @order.with_lock do
+        @order.order_items.each do |item|
+          product = item.product
+          product.with_lock do
+            if product.quantity < item.quantity
+              return false
+            end
+            product.update!(quantity: product.quantity - item.quantity)
+          end
+        end
+        @order.update!(status: 'processing')
+      end
     end
-    @order.update!(status: 'processing')
+    true
   end
 
   def cancel_order
