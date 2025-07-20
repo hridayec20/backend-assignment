@@ -28,19 +28,40 @@ class OrderService
   end
 
   def process_order
-    @order.order_items.each do |item|
-      product = item.product
-      product.update!(quantity: product.quantity - item.quantity)
+    return false if @order.status == 'processing' || @order.status == 'completed'
+    return false if @order.status != 'validated'
+
+    ActiveRecord::Base.transaction do
+      @order.with_lock do
+        @order.order_items.each do |item|
+          product = item.product
+          product.with_lock do
+            if product.quantity < item.quantity
+              return false
+            end
+            product.update!(quantity: product.quantity - item.quantity)
+          end
+        end
+        @order.update!(status: 'processing')
+      end
     end
-    @order.update!(status: 'processing')
+    true
   end
 
   def cancel_order
-    @order.order_items.each do |item|
-      product = item.product
-      product.update!(quantity: product.quantity + item.quantity)
+    return if @order.status == 'cancelled'
+    
+    ActiveRecord::Base.transaction do
+      @order.with_lock do
+        @order.order_items.each do |item|
+          product = item.product
+          product.with_lock do
+            product.update!(quantity: product.quantity + item.quantity)
+          end
+        end
+        @order.update!(status: 'cancelled')
+      end
     end
-    @order.update!(status: 'cancelled')
   end
 
   def complete_order
@@ -52,11 +73,20 @@ class OrderService
   end
 
   def validate_order
-    @order.order_items.each do |item|
-      product = item.product
-      return false unless product.can_be_ordered?(item.quantity)
+    ActiveRecord::Base.transaction do
+      @order.order_items.each do |item|
+        product = item.product
+        product.with_lock do
+          unless product.active? && item.quantity > 0 && product.quantity >= item.quantity
+            return false
+          end
+        end
+      end
+      @order.update!(status: 'validated')
+      true
     end
-    true
+  rescue ActiveRecord::RecordInvalid
+    false
   end
 
   private
